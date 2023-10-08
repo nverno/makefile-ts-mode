@@ -1,18 +1,20 @@
 SHELL = /bin/bash
 
-TSDIR   ?= $(CURDIR)/tree-sitter-make
-TESTDIR ?= $(TSDIR)/examples
+TSDIR     ?= $(CURDIR)/tree-sitter-make
+TS_REPO   ?= https://github.com/alemuller/tree-sitter-make
+TS_BRANCH ?= main
+TESTDIR   ?= $(TSDIR)/examples
 
 all:
 	@
 
 dev: $(TSDIR)
 $(TSDIR):
-	@git clone --depth=1 https://github.com/alemuller/tree-sitter-make
+	@git clone -b $(TS_BRANCH) --depth=1 $(TS_REPO)
 	@printf "\33[1m\33[31mNote\33[22m npm build can take a while\e[0m\n" >&2
 	cd $(TSDIR) &&                                         \
 		npm --loglevel=info --progress=true install && \
-		npm run generate
+		npx tree-sitter generate
 
 .PHONY: parse-%
 parse-%:

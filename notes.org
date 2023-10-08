@@ -1,0 +1,14 @@
+* Grammar bugs
+- doesn't understand '${' function '}', but '{' is valid grouping construct
+- ignores escape lines in variable assignment ::
+  #+begin_src makefile
+FOO = $(info foo) \
+	@$(RM) bar
+  #+end_src
+- strings in assignment ::
+  #+begin_src 
+FOO = $(BAR) --eval "me"
+  #+end_src
+
+* Forks
+- https://github.com/milahu/tree-sitter-make/tree/add-argument-parsing

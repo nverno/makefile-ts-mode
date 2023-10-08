@@ -1,4 +1,4 @@
-;;; makefile-ts-mode.el --- Major mode for makefiles -*- lexical-binding: t; -*-
+;;; makefile-ts-mode.el --- Major mode for makefiles using tree-sitter -*- lexical-binding: t; -*-
 
 ;; This is free and unencumbered software released into the public domain.
 
@@ -7,7 +7,7 @@
 ;; Version: 1.0.0
 ;; Package-Requires: ((emacs "29.1"))
 ;; Created: 29 September 2023
-;; Keywords: make languages tree-sitter
+;; Keywords: makefile languages tree-sitter
 
 ;; This file is not part of GNU Emacs.
 ;;
@@ -38,18 +38,31 @@
 ;;
 ;;; Installation:
 ;;
-;; Add the following entry to `treesit-language-source-alist':
+;; Install tree-sitter grammar library.
 ;;    
 ;;     (add-to-list
 ;;      'treesit-language-source-alist
-;;      '(make "https://github.com/alemuller/tree-sitter-make")
-;;
-;; and call `treesit-install-language-grammar' to do the installation.
+;;      '(make "https://github.com/alemuller/tree-sitter-make" "main")
+;;     (treesit-install-language-grammar 'make)
 ;;
 ;;; Code:
 
 (eval-when-compile (require 'cl-lib))
 (require 'treesit)
+
+(defcustom makefile-ts-mode-indent-directive 2
+  "Number of spaces for each indentation step in directives."
+  :group 'makefile
+  :type 'integer
+  :safe 'integerp)
+
+(defface makefile-ts-mode-call-grouping-construct
+  '((t (:inhert font-lock-bracket-face :weight bold)))
+  "Font lock face to highlight braces around function call.")
+
+(defface makefile-ts-mode-target-face
+  '((t (:inherit font-lock-function-name-face)))
+  "Font lock face to highlight makefile targets.")
 
 ;;; Syntax
 
@@ -75,26 +88,30 @@
 (defvar makefile-ts-mode--indent-rules
   '((make
      ((parent-is "makefile") parent 0)
+     ((node-is "endef") parent-bol 0)
+     ((node-is "endif") parent-bol 0)
+     ((and (parent-is "recipe")) parent-bol 8)
+     ((parent-is "define_directive") parent-bol makefile-ts-mode-indent-directive)
      ;; ((node-is ")") parent-bol 0)
      ;; ((node-is "}") parent-bol 0)
      ;; ((node-is "]") parent-bol 0)
      ;; ((parent-is "block") parent-bol makefile-ts-mode-indent-level)
      ;; ((node-is "else") parent-bol 0)
-     (no-node no-indent)
-     (catch-all no-indent)))
+     (no-node parent-bol 0)
+     (catch-all parent-bol 0)))
   "Tree-sitter indentation rules for make.")
 
 ;;; Font-Lock
 
 (defvar makefile-ts-mode--feature-list
   '(( comment definition)
-    ( keyword string builtin directive)
-    ( assignment function variable escape-sequence)
+    ( keyword builtin string directive)
+    ( function variable escape-sequence)
     ( bracket delimiter operator error))
   "`treesit-font-lock-feature-list' for `makefile-ts-mode'.")
 
-(defvar makefile-ts-mode--includes '("include" "sinclude" "-include"))
-(defvar makefile-ts-mode--conditions
+
+(defvar makefile-ts-mode--conditionals
   '("if" "ifeq" "ifneq" "ifdef" "ifndef" "else" "endif" "or" "and"))
 
 (defvar makefile-ts-mode--keywords
@@ -115,10 +132,10 @@
   ;; or
   ;; tree-sitter grammar
   '("abspath" "addprefix" "addsuffix" "and" "basename" "call" "dir" "error"
-   "eval" "file" "filter" "filter-out" "findstring" "firstword" "flavor" "foreach"
-   "if" "info" "join" "lastword" "notdir" "or" "origin" "patsubst" "realpath"
-   "sort" "strip" "subst" "suffix" "value" "warning" "wildcard" "word" "wordlist"
-   "words")
+    "eval" "file" "filter" "filter-out" "findstring" "firstword" "flavor" "foreach"
+    "if" "info" "join" "lastword" "notdir" "or" "origin" "patsubst" "realpath"
+    "shell" "sort" "strip" "subst" "suffix" "value" "warning" "wildcard" "word" "wordlist"
+    "words")
   ;; make-mode
   ;; "subst" "patsubst" "strip" "findstring" "filter" "filter-out" "sort" "dir"
   ;; "notdir" "suffix" "basename" "addprefix" "addsuffix" "join" "word" "words"
@@ -126,16 +143,49 @@
   ;; string-end
   "Make builtin functions for tree-sitter font-locking.")
 
+(defvar makefile-ts-mode--builtin-targets
+  '(".DEFAULT"
+    ".SUFFIXES"
+    ".DELETE_ON_ERROR"
+    ".EXPORT_ALL_VARIABLES"
+    ".IGNORE"
+    ".INTERMEDIATE"
+    ".LOW_RESOLUTION_TIME"
+    ".NOTPARALLEL"
+    ".ONESHELL"
+    ".PHONY"
+    ".POSIX"
+    ".PRECIOUS"
+    ".SECONDARY"
+    ".SECONDEXPANSION"
+    ".SILENT"
+    ".SUFFIXES"))
+
+(defvar makefile-ts-mode--builtin-variables
+  '(".DEFAULT_GOAL"
+    ".EXTRA_PREREQS"
+    ".FEATURES"
+    ".INCLUDE_DIRS"
+    ".RECIPEPREFIX"
+    ".SHELLFLAGS"
+    ".VARIABLES"
+    "MAKEARGS"
+    "MAKEFILE_LIST"
+    "MAKEFLAGS"
+    "MAKE_RESTARTS"
+    "MAKE_TERMERR"
+    "MAKE_TERMOUT"
+    "SHELL")
+  "Make builtin variables for tree-sitter font-locking.")
+
 (defvar makefile-ts-mode--automatic-vars
   '("@" "%" "<" "?" "^" "+" "/" "*" "D" "F")
   "Make automatic variables.")
 
-(defvar makefile-ts-mode--builtin-variables '()
-  "Make builtin variables for tree-sitter font-locking.")
-
 (defvar makefile-ts-mode--operators
-  '("=" ":=" "::=" "?=" "+="            ; assignment ops
-    "!=" "@" "-" "+")
+  '("=" ":=" "::=" "?=" "+=" "!="            ; assignment ops
+    ;; recipe prefixes
+    "@" "-" "+")
   "Make operators for font-locking.")
 
 (defvar makefile-ts-mode--delimiter
@@ -166,14 +216,21 @@
 
    :language 'make
    :feature 'string
-   '([(text) (string) (raw_text)] @font-lock-string-face
-     (variable_assignment (word) @font-lock-string-face))
+   '((string) @font-lock-string-face
+
+     (include_directive
+      filenames: (list [(word)] @font-lock-string-face))
+
+     (substitution_reference
+      pattern: (word) @font-lock-string-face
+      replacement: (word) @font-lock-string-face))
    
    :language 'make
    :feature 'keyword
-   `([,@makefile-ts-mode--keywords] @font-lock-keyword-face
-     ;; ["@include"] @font-lock-preprocessor-face
-     )
+   `([,@makefile-ts-mode--keywords ,@makefile-ts-mode--conditionals]
+     @font-lock-keyword-face
+
+     (include_directive ["sinclude" "include" "-include"] @font-lock-preprocessor-face))
 
    ;; `makefile-special-targets-list'
    ;; `makefile-runtime-macros-list'
@@ -181,107 +238,114 @@
    ;; builtin functions, builtin variables, automatic variables
    :language 'make
    :feature 'builtin
-   `((function_call
-      function: _ @var (:match ,makefile-ts-mode--builtin-functions @var)
-      @font-lock-function-call-face)
-     (automatic_variable
-      ["$" "$$"]
-      _ @var (:match ,@makefile-ts-mode--automatic-vars @var)
-      @font-lock-constant-face)
+   `((rule
+      (targets
+       ((word) @font-lock-builtin-face
+        (:match ,(rx-to-string `(or ,@makefile-ts-mode--builtin-targets))
+                @font-lock-builtin-face))))
+
+     (variable_assignment
+      ((word) @font-lock-variable-name-face
+       (:match ,(rx-to-string `(or ,@makefile-ts-mode--builtin-variables))
+               @font-lock-variable-name-face)))
+     
+     (function_call
+      function: _ @font-lock-function-call-face
+      (:match ,(rx-to-string
+                `(or ,@makefile-ts-mode--builtin-functions))
+              @font-lock-function-call-face))
+
+     (shell_function
+      function: "shell" @font-lock-function-call-face)
+     ;; (automatic_variable
+     ;;  ["$" "$$"]
+     ;;  _ @var (:match ,@makefile-ts-mode--automatic-vars @var)
+     ;;  @font-lock-constant-face)
      ;; ["print" "printf"] @font-lock-builtin-face
      ;; ((identifier) @var (:match ,makefile-ts-mode--builtin-variables @var))
      ;; @font-lock-variable-name-face
      )
 
-   ;; TODO:
-   ;; - targets
-   ;; - conditionals
-   ;; - includes
-   ;; - negation char
-   ;; - special targets
-   
-   ;; rules, macros
-   ;; :language 'make
-   ;; :feature 'definition
-   ;; '()
-
-   ;; $(function ...) $(shell ...) differently? `makefile-shell'
-   ;; `makefile-gnumake-functions-alist'
    :language 'make
-   :feature 'function
-   '((function_call
-      function: _ @font-lock-function-call-face
-      (arguments
-       argument: (_) :* @font-lock-variable-use-face)))
-   
+   :feature 'definition
+   '((rule (targets (word) :* @makefile-ts-mode-target-face))
+     
+     (variable_assignment
+      name: (word) @font-lock-variable-name-face)
+
+     (shell_assignment
+      name: (word) @font-lock-variable-name-face)
+
+     (define_directive
+      name: (word) @font-lock-variable-name-face)
+
+     (undefine_directive
+      variable: (word) @font-lock-variable-use-face)
+
+     (ifdef_directive
+      variable: (_) @font-lock-variable-use-face)
+
+     (ifndef_directive
+      variable: (_) @font-lock-variable-use-face))
+
    ;; TODO:
+   ;; - negation char
    ;; - RECIPEPREFIX_assignment
    ;; - VPATH_assignment
-   :language 'make
-   :feature 'assignment
-   '((shell_assignment
-      name: (word) @font-lock-variable-use-face)
-
-     ;; (variable_assignment
-     ;;  ;; TODO: lists
-     ;;  target_or_pattern: (list) :?
-     ;;  name: (word) @font-lock-variable-use-face
-     ;;  value: (text) :?)
-     )
-     
+   ;; :language 'make
+   ;; :feature 'assignment
+   ;; '((shell_assignment
+   ;;    name: (word) @font-lock-variable-use-face)
    ;; heredocs
    ;; :language 'make
    ;; :feature 'literal
    ;; '((number) @font-lock-number-face
    ;;   [(regex_constant) (regex_flags)] @font-lock-constant-face)
 
-   :language 'make
-   :feature 'directive
-   '(
-     ;; (define_directive
-     ;;  name: (_) @font-lock-function-name-face
-     ;;  value: (_) :?)
-     
-     (undefine_directive
-      variable: (_) @font-lock-variable-use-face)
-
-     (ifdef_directive
-      variable: (_) @font-lock-variable-use-face)
-
-     (ifndef_directive
-      variable: (_) @font-lock-variable-use-face)
-     ;; TODO:
-     ;; (export_directive
-     ;;  variables: (list))
-     ;; (override_directive)
-     ;; (unexport_directive
-     ;;  variables: (list))
-     )
-
    ;; variable references in targets/strings/comments
    :language 'make
    :feature 'variable
+   ;; TODO:
+   ;; (override_directive)
+   ;; (unexport_directive
+   ;;  variables: (list))
    '((substitution_reference
-      text: (_) @font-lock-variable-name-face
-      pattern: (_)
-      replacement: (_))
+      text: (word) @font-lock-variable-name-face)
 
-     (variable_reference (_) @font-lock-variable-use-face))
+     (export_directive
+      variables: (list [(word)] @font-lock-variable-use-face))
+
+     (variable_reference (word) @font-lock-variable-use-face))
    
    :language 'make
+   :feature 'operator
+   `((rule ["&:" ":" "::"] @font-lock-operator-face)
+     (recipe_line "-" @font-lock-negation-char-face)
+     (recipe_line ["@" "+"] @font-lock-operator-face)
+     [,@makefile-ts-mode--operators] @font-lock-operator-face
+     ;; 'n' in ifndef ifneq etc
+     ;; "!" @font-lock-negation-char-face
+     )
+
+   :language 'make
    :feature 'bracket
-   '(["(" ")" "{" "}"] @font-lock-bracket-face)
+   '((shell_function ["$" "{" "}" "(" ")"] @makefile-ts-mode-call-grouping-construct)
+     (function_call ["$" "{" "}" "(" ")"] @makefile-ts-mode-call-grouping-construct)
+     ["(" ")" "{" "}"] @font-lock-bracket-face)
 
    :language 'make
    :feature 'delimiter
    '(["," ";" ":" "::" "&:" "'" "|"] @font-lock-delimiter-face)
 
+   ;; ;; $(function ...) $(shell ...) differently? `makefile-shell'
+   ;; ;; `makefile-gnumake-functions-alist'
    :language 'make
-   :feature 'operator
-   `([,@makefile-ts-mode--operators] @font-lock-operator-face
-     ;; 'n' in ifndef ifneq etc
-     ;; "!" @font-lock-negation-char-face
-     )
+   :feature 'function
+   '((function_call
+      function: _ @font-lock-function-call-face
+      ;; (arguments
+      ;;  argument: (text) @font-lock-variable-use-face :*)
+      ))
 
    :language 'make
    :feature 'escape-sequence
@@ -342,7 +406,7 @@
     (setq-local treesit-simple-imenu-settings nil)
 
     ;; Dabbrev.
-    (setq-local dabbrev-abbrev-skip-leading-regexp "\\$")
+    (setq-local dabbrev-abbrev-skip-leading-regexp "[@$]")
 
     ;; TODO: Filling.
     (setq-local fill-paragraph-function 'makefile-fill-paragraph)
@@ -354,7 +418,8 @@
 
 (when (treesit-ready-p 'make)
   (add-to-list 'auto-mode-alist '("\\.[Mm]akefile\\'" . makefile-ts-mode))
-  (add-to-list 'auto-mode-alist '("\\.m\\(ak\\)?k\\'" . makefile-ts-mode)))
+  (add-to-list 'auto-mode-alist
+               '("\\.\\(?:m\\(?:ake\\|k\\)\\)\\'" . makefile-ts-mode)))
 
 (provide 'makefile-ts-mode)
 ;; Local Variables:
