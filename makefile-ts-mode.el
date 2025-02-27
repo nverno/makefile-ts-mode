@@ -39,7 +39,7 @@
 ;;; Installation:
 ;;
 ;; Install tree-sitter grammar library.
-;;    
+;;
 ;;     (add-to-list
 ;;      'treesit-language-source-alist
 ;;      '(make "https://github.com/alemuller/tree-sitter-make" "main")
@@ -224,7 +224,7 @@
      (substitution_reference
       pattern: (word) @font-lock-string-face
       replacement: (word) @font-lock-string-face))
-   
+
    :language 'make
    :feature 'keyword
    `([,@makefile-ts-mode--keywords ,@makefile-ts-mode--conditionals]
@@ -248,7 +248,7 @@
       ((word) @font-lock-variable-name-face
        (:match ,(rx-to-string `(or ,@makefile-ts-mode--builtin-variables))
                @font-lock-variable-name-face)))
-     
+
      (function_call
       function: _ @font-lock-function-call-face
       (:match ,(rx-to-string
@@ -269,7 +269,7 @@
    :language 'make
    :feature 'definition
    '((rule (targets (word) :* @makefile-ts-mode-target-face))
-     
+
      (variable_assignment
       name: (word) @font-lock-variable-name-face)
 
@@ -316,10 +316,10 @@
       variables: (list [(word)] @font-lock-variable-use-face))
 
      (variable_reference (word) @font-lock-variable-use-face))
-   
+
    :language 'make
    :feature 'operator
-   `((rule ["&:" ":" "::"] @font-lock-operator-face)
+   `((rule ["&:" "::"] @font-lock-operator-face)
      (recipe_line "-" @font-lock-negation-char-face)
      (recipe_line ["@" "+"] @font-lock-operator-face)
      [,@makefile-ts-mode--operators] @font-lock-operator-face
@@ -393,7 +393,7 @@
     (setq-local treesit-defun-prefer-top-level t)
     (setq-local treesit-defun-name-function #'makefile-ts-mode--defun-name)
     (setq-local treesit-defun-type-regexp nil) ;; (rx bos "module")
-    
+
     ;; navigation objects
     (setq-local treesit-thing-settings
                 `((make
@@ -413,13 +413,16 @@
 
     ;; TABs
     (setq indent-tabs-mode t)
-    
+
     (treesit-major-mode-setup)))
 
-(when (treesit-ready-p 'make)
-  (add-to-list 'auto-mode-alist '("\\.[Mm]akefile\\'" . makefile-ts-mode))
-  (add-to-list 'auto-mode-alist
-               '("\\.\\(?:m\\(?:ake\\|k\\)\\)\\'" . makefile-ts-mode)))
+(when (fboundp 'derived-mode-add-parents)
+  (derived-mode-add-parents 'makefile-ts-mode '(makefile-mode)))
+
+;; (when (treesit-ready-p 'make)
+;;   (add-to-list 'auto-mode-alist '("\\.[Mm]akefile\\'" . makefile-ts-mode))
+;;   (add-to-list 'auto-mode-alist
+;;                '("\\.\\(?:m\\(?:ake\\|k\\)\\)\\'" . makefile-ts-mode)))
 
 (provide 'makefile-ts-mode)
 ;; Local Variables:
